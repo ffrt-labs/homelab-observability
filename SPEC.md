@@ -1,7 +1,7 @@
 # homelab-observability — v1 Spec
 
 Status: **agreed, not yet implemented**
-Date: 2026-07-19
+Date: 2026-07-19 (amended 2026-07-20 — see [Amendments](#amendments))
 Related: [`ffrt-labs/agregado#4`](https://github.com/ffrt-labs/agregado/issues/4) (the producer-side counterpart)
 
 ---
@@ -48,8 +48,8 @@ collector can be replaced later without any application changing.
 
 ## Architecture
 
-Four containers, one repo, one compose file. Joined to the external `edge` network,
-publishing **no host ports** — Caddy remains the only way in.
+Five containers, one repo, one compose file, publishing **no host ports** — Caddy remains
+the only way in.
 
 | Service | Role |
 |---|---|
@@ -57,6 +57,12 @@ publishing **no host ports** — Caddy remains the only way in.
 | **Loki** | Log store. Filesystem backend, 90-day retention |
 | **Prometheus** | Container-health metrics only — never application internals |
 | **Grafana** | Query UI + alerting engine → Telegram |
+| **Canary sidecar** | The out-of-band checks. See [decision 15](#15-network-topology) and [decision 14](#14-dead-mans-switch) |
+
+**Network topology** (amended — see [decision 15](#15-network-topology)): all five join a
+private `observability` network. **Only Grafana** also joins the external `edge` network,
+where Caddy reaches it. Loki, Prometheus and Alloy are unreachable from any application
+container.
 
 Alloy runs three collection paths:
 
@@ -254,15 +260,27 @@ The correct distinction:
 
 ### 10. The v1 alert set
 
-All app-agnostic. Ordered by ship sequence:
+All app-agnostic. Ordered by priority — **not** by ship sequence; for that see
+[Roadmap](#roadmap).
 
-| # | Alert | Catches |
-|---|---|---|
-| 1 | Host disk > 80% | The stack becoming the outage |
-| 2 | Dead-man's switch stops pinging | Box dead, Loki dead, Alloy dead, pipeline broken |
-| 3 | Any container gone / not running | Crash loops, OOM kills, failed deploys |
-| 4 | Any container reports unhealthy | Running but broken |
-| 5 | Any container emitting `ERROR` | Presence of failure |
+| # | Alert | Catches | Channel |
+|---|---|---|---|
+| 1 | Host disk > 80% | The stack becoming the outage | Healthchecks.io → email |
+| 2 | Dead-man's switch stops pinging | Box dead, Loki dead, Alloy dead, pipeline broken | Healthchecks.io → email |
+| 3 | Any container gone / not running | Crash loops, OOM kills, failed deploys | Grafana → Telegram |
+| 4 | Any container reports unhealthy | Running but broken | Grafana → Telegram |
+| 5 | Any container emitting `ERROR` | Presence of failure | Grafana → Telegram |
+
+**Alerts 1 and 2 are deliberately out-of-band** (amended). Both are inverted heartbeats
+run by the canary sidecar and delivered by Healthchecks.io over email, with no dependency
+on Prometheus, Grafana, or Telegram.
+
+The reasoning is the same for both. The disk-full scenario is precisely the one where Loki
+cannot write chunks, Prometheus cannot write blocks, and Grafana cannot write its SQLite —
+so routing alert 1 *through* that stack asks it to report the condition that breaks it.
+Alert 2 has the same shape by definition. A monitoring stack must not be the delivery path
+for the alerts about its own death. This extends decision 14's "notifies by email, not
+Telegram" reasoning from one alert to both.
 
 **Two design stances, adopted deliberately:**
 
@@ -293,6 +311,14 @@ different failure characteristics:
   simply absent from every subsequent scrape, so the failure is discovered *late* rather
   than *never*. Does **not** expose Docker's healthcheck verdict; `container_last_seen`
   gives presence, not health.
+
+  > **Correction (amended).** An earlier draft implied cAdvisor would also serve the host
+  > disk alert. It does not: cAdvisor exposes *per-container* filesystem stats
+  > (`container_fs_*`), never host filesystem usage. `node_filesystem_avail_bytes` comes
+  > from node exporter — in Alloy, `prometheus.exporter.unix`. As originally written, the
+  > highest-priority alert in v1 had no data source. That alert has moved out-of-band
+  > (decision 10); `prometheus.exporter.unix` is still adopted, but for **dashboards and
+  > trends**, not for alert 1.
 - **Docker events → Loki** — **edge-triggered**. Captures `container die` and
   `health_status: unhealthy` transitions, closing the healthcheck gap cAdvisor leaves. But
   if Alloy is down when a container dies, that event is gone forever and nothing ever
@@ -393,6 +419,102 @@ trustworthy when everything else is lying.
   path — if the failure is "the box lost internet," a Telegram alert that never arrives is
   worthless. Healthchecks.io sends from its own infrastructure.
 
+**Where it runs (amended):** a sidecar container in this repo's compose file, not a host
+crontab. Host cron would put load-bearing monitoring logic in host state that no repo owns
+and no `git log` records — Open Risk 1 wearing a different hat. The sidecar reaches
+`loki:3100` over Docker DNS with no host port, and, decisively, **its own death is covered
+by the thing it feeds**: if it stops, pings stop, and Healthchecks.io raises the alarm. A
+dead cron job is silent.
+
+The same sidecar runs the disk check, with the host root filesystem bind-mounted
+read-only. That is a second privileged-ish mount alongside the Docker socket; accepted on
+the same grounds as decision 5, and strictly less dangerous than the socket.
+
+A `sleep 300` loop drifts and has no jitter. Grace periods (~15m against a 5m schedule)
+are set deliberately rather than left at their defaults.
+
+### 15. Network topology
+
+*Added 2026-07-20.*
+
+The original text said the stack joins the external `edge` network. Read literally, all
+containers do. That is rejected.
+
+`edge` is **shared**: `mycoach` and `agregado` are on it today and every future app will
+be, and Docker's internal DNS resolves service names across it. Single-binary Loki runs
+with `auth_enabled: false`, so any container on `edge` could
+`curl http://loki:3100/loki/api/v1/query` and read everything. Decision 8 already
+establishes that these logs may contain database passwords and Cloudflare tokens from
+`agregado`'s stdout. Putting an unauthenticated read API for every secret on the box onto
+the same network as every application would negate the argument for a strong Grafana
+admin password that decision 8 spends three paragraphs making. The same applies to
+Prometheus and to Alloy's HTTP port — which the spec already says must never be exposed
+outside the Docker network, a statement inconsistent with joining the shared one.
+
+**Chosen:** a private `observability` network for all five services; Grafana dual-homed
+onto `edge` as well. Caddy reaches Grafana; nothing else reaches anything. Cost: one extra
+`networks:` entry. It reduces the blast radius of a compromised app container from "can
+read every log line this server has ever produced" to "can talk to Caddy."
+
+Loki `auth_enabled` / multi-tenancy is **deferred**, filed next to `docker-socket-proxy`
+as a drop-in hardening upgrade once nothing can route to it.
+
+> **Not solved by this.** Alloy still holds the Docker socket and the canary sidecar now
+> holds the host root filesystem. Network isolation touches neither.
+
+---
+
+## Roadmap
+
+Ship sequence, distinct from the alert priority ordering in decision 10. Each task ends in
+a state that is verifiable rather than merely deployed.
+
+### Task 1 — logs land, and the pipeline can say when it stops
+
+Alloy + Loki + Grafana + canary sidecar. Broad collection from every container except
+Pi-hole. Grafana behind Caddy. Both out-of-band alerts live. CI deploy with a secrets
+guard.
+
+Deliberately **not** the four containers standing up doing nothing observable: that is the
+maximally deferrable state — nothing proves the design works and nothing hurts if it
+stops. This slice front-loads the two riskiest unknowns (the Docker socket path and the
+cross-repo Caddy change) instead of saving them.
+
+Retention and rate limits are **in task 1**, not deferred. Broad collection is where
+volume surprises live, and decision 7's failure mode is filling the root filesystem.
+
+Out of scope for task 1: Prometheus, cAdvisor, `prometheus.exporter.unix`, Docker events,
+Telegram, every Grafana alert rule, the README onboarding contract.
+
+### Task 2 — the Telegram path, proven on the alert that needs nothing new
+
+Telegram bot, contact point, notification policy (`group_interval` ~5m, `repeat_interval`
+~4h), and alert 5 — which requires only Loki, already delivered. Exported to YAML and
+committed.
+
+**Before Prometheus, contradicting decision 11's sequencing**, for three reasons. The
+notification policy is the highest-risk piece of the alerting design and has nothing to do
+with Prometheus; decision 10(b) makes throttling mandatory precisely because 10(a) is
+otherwise dangerous, and alert 5 across every container is the alert most likely to
+produce a flood. Discover that on the alert you can disable in one commit, not while
+simultaneously debugging a new Prometheus deployment. Second, it forces the Git-export
+workflow to happen once, early, on a single small rule — Open Risk 1, addressed by habit
+rather than by a merge blocker across five rules. Third, alert 5's noise is what tells you
+which apps need their log levels re-levelling, and that generates work in other repos.
+
+Accepted gap: container-down detection waits one more task. The canary already covers "the
+pipeline stopped" and the disk check covers "the box is filling."
+
+### Task 3 — the metrics layer
+
+Prometheus, `prometheus.exporter.cadvisor`, `prometheus.exporter.unix`, Docker events →
+Loki. Alerts 3 and 4, slotting into machinery already proven in task 2.
+
+### Task 4 — the onboarding contract
+
+The README deliverable: what an application must emit to earn alerts. This is where Open
+Risk 2 is either addressed or quietly abandoned.
+
 ---
 
 ## Out of Scope
@@ -416,6 +538,24 @@ trustworthy when everything else is lying.
    script, and `.github/workflows/deploy.yml` mirroring `homelab-edge` (self-hosted runner,
    push to `main`, `.env` written from Actions secrets, `docker compose up -d
    --force-recreate --remove-orphans`).
+
+   **Two additions to the workflow (amended):**
+
+   - **A PR-triggered validation job** — `docker compose config -q` plus Alloy config
+     validation. Push-to-`main`-deploys is kept; no review gate is added. This catches the
+     likeliest failure, a malformed Alloy config that crash-loops on the box while nobody
+     is watching, without pretending to simulate a Linux host that cannot be simulated
+     (cAdvisor is Linux-only, and `df` on a bind-mounted macOS root is meaningless). The
+     spec's `docker compose down -v` property, not a local rig, is the real safety net.
+   - **A guard step that fails loudly on any missing or blank secret or var**, before
+     `docker compose up`. The motivating case: `GF_SECURITY_ADMIN_PASSWORD` is honoured
+     **only when Grafana initialises its database**. Deploy once without it and Grafana
+     writes `admin/admin` into the volume; setting the variable afterwards changes
+     nothing. The result is a compose file that plainly sets a strong password, on a
+     Grafana that still accepts `admin/admin`, with nothing anywhere to say so — this
+     repo's own failure mode, inside this repo's own security control. A stack that
+     catches silent failures everywhere except its own deploy pipeline is the joke
+     telling itself.
 2. Exported alert-rule YAML committed to this repo **before v1 merges**.
 3. A PR to `homelab-edge` adding the `@grafana` handle block.
 4. A README containing the **onboarding contract**: what an application must emit to earn
@@ -456,3 +596,23 @@ The amendment (keep low-volume per-cycle summary lines such as
 `poll_complete source_id=X articles_new=3` at `info`, as distinct from one line per
 message) is now part of per-app onboarding rather than this repo's v1. Not a v1 blocker.
 It is a landmine for whoever onboards that app.
+
+---
+
+## Amendments
+
+### 2026-07-20 — roadmap planning
+
+Five changes, agreed before any implementation began. Recorded here so the spec and the
+build do not disagree from day one.
+
+| # | Change | Where |
+|---|---|---|
+| 1 | cAdvisor cannot serve the host disk alert; `prometheus.exporter.unix` added, for dashboards rather than for alert 1 | [Decision 11](#11-both-prometheus-and-docker-events-to-loki) |
+| 2 | Alerts 1 and 2 move out-of-band to Healthchecks.io email, off the Grafana/Telegram path | [Decision 10](#10-the-v1-alert-set), [14](#14-dead-mans-switch) |
+| 3 | Private `observability` network; only Grafana joins shared `edge` | [Decision 15](#15-network-topology) |
+| 4 | Ship order is Telegram before Prometheus, contradicting decision 11's sequencing | [Roadmap](#roadmap) |
+| 5 | Canary runs as a compose sidecar, not host cron; PR validation job and secrets guard added to CI | [Decision 14](#14-dead-mans-switch), [Deliverables](#deliverables) |
+
+Changes 1 and 3 are corrections — the spec as written was wrong. Changes 2, 4 and 5 are
+decisions the spec had not reached.
