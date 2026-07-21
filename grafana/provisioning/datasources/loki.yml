@@ -1,0 +1,21 @@
+# Provisioned from Git, never clicked into existence.
+#
+# Datasources are write-once and never tuned, so they belong here rather
+# than in Grafana's SQLite volume. Alert rules and dashboards are the
+# opposite — they need iteration against real log volume — and those get
+# built in the UI, exported to YAML, and committed (SPEC decision 6).
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    # Reached over the private `observability` network. Loki publishes no
+    # host port and is not on the shared `edge` network, so Grafana is the
+    # only thing on this box that can query it (SPEC decision 15).
+    url: http://loki:3100
+    isDefault: true
+    editable: false
+    jsonData:
+      maxLines: 1000

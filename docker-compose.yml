@@ -1,0 +1,150 @@
+# The observability stack. Four services here; Prometheus joins in task 3.
+#
+# Publishes NO host ports. Caddy (homelab-edge) is the only way in, and it
+# can only reach Grafana.
+
+# Docker's json-file driver defaults to unbounded growth, which is the same
+# disk-filling failure this stack exists to prevent. Bound our own services'
+# logs; other repos' containers are their own business.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # Collects container logs via Docker service discovery and ships them to
+  # Loki. Zero changes to any other repo, ever — an application is onboarded
+  # by existing (SPEC decision 5).
+  alloy:
+    image: grafana/alloy:v1.18.0@sha256:491b0578c04983fd54fe99b587b6fab4404dc46d0dc16677bd6b00cc1140b308
+    container_name: alloy
+    restart: unless-stopped
+    logging: *default-logging
+    # Needed to read the Docker socket. Note this changes nothing about the
+    # risk profile: socket access is root-equivalent on the host regardless
+    # of the container's user, because anything that can talk to the Docker
+    # API can start a privileged container (SPEC decision 5).
+    user: root
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      # Bound to loopback: Alloy's HTTP endpoint is not needed by anything
+      # else, and the spec forbids exposing it outside the container.
+      - --server.http.listen-addr=127.0.0.1:12345
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    networks:
+      - observability
+
+  # Log store. Filesystem backend, 90-day retention, per-stream rate limits.
+  loki:
+    image: grafana/loki:3.7.3@sha256:70b9f699fc9bb868b62f1cfd4f787dfa50242f1fd92e6089787d5d7daea75fe8
+    container_name: loki
+    restart: unless-stopped
+    logging: *default-logging
+    user: root
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      # Named volume, never a bind mount into the application filesystem.
+      # `docker compose down -v` here is a supported, non-destructive
+      # operation — telemetry is regenerable (SPEC decision 13).
+      - loki-data:/loki
+    # No healthcheck: the Loki image is distroless — no shell, no wget, no
+    # curl — and Docker healthchecks can only run inside the container.
+    # Nothing here depends on one, because every consumer already degrades
+    # correctly while Loki is starting: Alloy batches and retries, and the
+    # canary fails closed and tries again next cycle.
+    networks:
+      - observability
+
+  # Query UI. The only service on the shared `edge` network.
+  grafana:
+    image: grafana/grafana:13.1.0@sha256:121a7a9ece6dc10b969f1f96eed64b4f07dfac0d0b8abc070f7cb83bbde86f63
+    container_name: grafana
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: .env
+    environment:
+      # Honoured ONLY at first database initialisation. See .env.example —
+      # this is the footgun the deploy workflow's guard step exists for.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      # A strong password matters even on a LAN-only box: this server runs a
+      # self-hosted GitHub Actions runner, so any workflow — including one
+      # from a compromised dependency — executes inside the LAN, behind
+      # Caddy. "LAN-only" is not the isolation boundary it feels like, and
+      # Grafana with admin rights can query every log on the box
+      # (SPEC decision 8).
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://grafana.${EDGE_BASE_DOMAIN}
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Disposable cache. Git is the source of truth (SPEC decision 6).
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+    networks:
+      - observability
+      - edge
+
+  # The dead-man's switch and the disk check. Both inverted heartbeats,
+  # both delivered by Healthchecks.io over email, both entirely independent
+  # of Grafana — so they survive the failures they exist to report.
+  #
+  # In this compose file rather than a host crontab: host cron would put
+  # load-bearing monitoring logic in state that no repo owns and no `git
+  # log` records, and a dead cron job is silent — whereas a dead sidecar
+  # stops pinging, which is itself the alarm (SPEC decision 14).
+  canary:
+    build:
+      context: ./canary
+    image: homelab-observability-canary
+    container_name: canary
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      LOKI_URL: http://loki:3100
+      LOKI_WINDOW: 5m
+      DISK_PATH: /host
+      DISK_THRESHOLD_PCT: "80"
+      CHECK_INTERVAL_SECONDS: "300"
+      HC_PING_URL_PIPELINE: ${HC_PING_URL_PIPELINE}
+      HC_PING_URL_DISK: ${HC_PING_URL_DISK}
+    volumes:
+      # Read-only view of the host root filesystem, so `df` measures the
+      # disk that actually matters. A second privileged-ish mount alongside
+      # the Docker socket, accepted on the same grounds and strictly less
+      # dangerous than it.
+      - /:/host:ro
+    depends_on:
+      - loki
+    networks:
+      - observability
+
+networks:
+  # Private to this stack. Loki, Alloy and the canary are unreachable from
+  # any application container: single-binary Loki runs auth_enabled: false,
+  # so putting it on the shared `edge` network would hand every app an
+  # unauthenticated read API over every log line on the server — including
+  # any secrets an app has printed to stdout (SPEC decision 15).
+  observability:
+    driver: bridge
+
+  # Created by homelab-edge. Only Grafana joins it.
+  edge:
+    external: true
+
+volumes:
+  loki-data:
+  grafana-data:
+  alloy-data:

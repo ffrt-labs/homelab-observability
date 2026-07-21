@@ -1,0 +1,85 @@
+# Single-binary Loki, filesystem storage.
+#
+# Not MinIO/S3: that would be a second stateful service to run and back up,
+# for a workload measured in tens of MB/day (SPEC decision 7).
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    # v13 + tsdb is required for structured metadata, which is how `level`
+    # rides along without multiplying streams 5x (SPEC decision 12).
+    - from: 2024-04-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # 90 days. Retention must exceed detection latency: alerting collapses
+  # that to minutes, but the first question after any alert is "when did
+  # this start?", and that is worthless if history stops at a week.
+  # ~50 MB/day compressed is ~4.5 GB against 200 GB of disk (SPEC decision 7).
+  retention_period: 2160h
+
+  # Set generously above normal peak, so one crash-looping container gets
+  # throttled rather than absorbed. Retention is time-based; a log-spam bug
+  # is volume-based and will outrun any time window.
+  #
+  # Accepted trade-off: during a genuine incident — exactly when logs matter
+  # most — some lines may be dropped. That is a real cost, accepted because
+  # an unthrottled ingest path during that same incident is precisely how
+  # the disk fills.
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+  per_stream_rate_limit: 8MB
+  per_stream_rate_limit_burst: 16MB
+
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+  # Attaches a detected_level to lines whose level Loki can infer, without
+  # it becoming a stream label. Best-effort by nature: well-behaved
+  # structured producers parse cleanly, Postgres and RabbitMQ do not.
+  discover_log_levels: true
+  allow_structured_metadata: true
+
+  # Enables the volume endpoints Grafana's Logs drilldown uses.
+  volume_enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  # WITHOUT THIS, LOKI DELETES NOTHING, EVER. Retention is off by default,
+  # so the default configuration of this stack is "grow until the disk is
+  # full" — on a disk shared with Postgres, RabbitMQ and every app on the
+  # box. The realistic worst case for this project is not a bad dashboard;
+  # it is filling the root filesystem at 2am and taking down every
+  # application simultaneously.
+  retention_enabled: true
+  delete_request_store: filesystem
+  compaction_interval: 10m
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+# No phone-home.
+analytics:
+  reporting_enabled: false

@@ -1,0 +1,59 @@
+# Test rig for the canary — the only bespoke code in the stack, and the
+# component the whole design leans on.
+#
+# Runs the real canary image against a REAL Loki, with the ping URLs pointed
+# at a stub that records what it receives. Log lines are pushed straight to
+# Loki's push API rather than by running Alloy, which keeps this runnable on
+# macOS: Alloy's Docker-socket and cgroup path is precisely the part that
+# cannot be faithfully reproduced there, and it is configuration rather than
+# logic — covered by CI validation and by deployment instead.
+#
+# Deliberately not mocking curl and df. That would verify the script calls
+# the commands it was written to call, which is tautological; the bugs live
+# in how it interprets a real Loki response body.
+name: obs-canary-test
+
+services:
+  loki:
+    image: grafana/loki:3.7.3@sha256:70b9f699fc9bb868b62f1cfd4f787dfa50242f1fd92e6089787d5d7daea75fe8
+    user: root
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      # The production config, unmodified. Testing against a hand-tuned
+      # variant would test something this repo never deploys.
+      - ../loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+    # No healthcheck — the Loki image is distroless, so there is no shell or
+    # HTTP client inside it to run one with. run-tests.sh polls /ready from
+    # the canary image instead.
+
+  # Test scaffolding, so a floating tag is acceptable here — unlike the
+  # production images, which are pinned by digest.
+  stub:
+    image: python:3.12-alpine
+    command: python /stub_server.py
+    volumes:
+      - ./stub_server.py:/stub_server.py:ro
+      - stub-requests:/requests
+
+  # Started only via `docker compose run` by run-tests.sh, one iteration at
+  # a time with per-case environment overrides.
+  canary:
+    build:
+      context: ../canary
+    environment:
+      LOKI_URL: http://loki:3100
+      LOKI_WINDOW: 5m
+      # The container's own root filesystem is enough to exercise the check;
+      # the branch under test is chosen by moving the threshold, not by
+      # filling a real disk.
+      DISK_PATH: /
+      DISK_THRESHOLD_PCT: "80"
+      CANARY_ONCE: "1"
+      CURL_TIMEOUT: "5"
+      HC_PING_URL_PIPELINE: http://stub:8080/ping/pipeline
+      HC_PING_URL_DISK: http://stub:8080/ping/disk
+    depends_on:
+      - loki
+
+volumes:
+  stub-requests:
