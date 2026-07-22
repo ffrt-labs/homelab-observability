@@ -1,0 +1,74 @@
+name: Deploy observability stack
+
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deployment
+    runs-on: self-hosted
+    steps:
+      - name: Setup PATH
+        run: echo "/usr/bin" >> $GITHUB_PATH
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # This repo's entire purpose is refusing to let misconfiguration be
+      # silent. A stack that catches silent failures everywhere except in
+      # its own deploy pipeline is the joke telling itself.
+      #
+      # The motivating case is GF_SECURITY_ADMIN_PASSWORD, which Grafana
+      # honours ONLY when it initialises its database. One deploy without it
+      # writes admin/admin into the volume permanently, while the compose
+      # file continues to show a strong password and nothing anywhere
+      # reports the discrepancy. The same guard now covers every secret this
+      # repo will ever add, including the Telegram token in task 2.
+      - name: Verify required secrets and variables are present
+        env:
+          EDGE_BASE_DOMAIN: ${{ vars.EDGE_BASE_DOMAIN }}
+          GF_SECURITY_ADMIN_PASSWORD: ${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
+          HC_PING_URL_PIPELINE: ${{ secrets.HC_PING_URL_PIPELINE }}
+          HC_PING_URL_DISK: ${{ secrets.HC_PING_URL_DISK }}
+        run: |
+          missing=""
+          for name in EDGE_BASE_DOMAIN GF_SECURITY_ADMIN_PASSWORD \
+                      HC_PING_URL_PIPELINE HC_PING_URL_DISK; do
+            value="$(printenv "$name" || true)"
+            if [ -z "$value" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing or blank required secret/variable:$missing"
+            echo "Set these under Settings -> Secrets and variables -> Actions."
+            echo "Refusing to deploy: see .env.example for why a blank"
+            echo "GF_SECURITY_ADMIN_PASSWORD is unrecoverable without down -v."
+            exit 1
+          fi
+          echo "All required secrets and variables are present."
+
+      - name: Write .env from secrets and vars
+        run: |
+          cat > .env <<'EOF'
+          EDGE_BASE_DOMAIN=${{ vars.EDGE_BASE_DOMAIN }}
+          GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
+          HC_PING_URL_PIPELINE=${{ secrets.HC_PING_URL_PIPELINE }}
+          HC_PING_URL_DISK=${{ secrets.HC_PING_URL_DISK }}
+          EOF
+
+      # Created by homelab-edge, but declared external here. Idempotent, and
+      # makes a cold rebuild in either order work.
+      - name: Ensure edge network exists
+        run: docker network create edge 2>/dev/null || true
+
+      - name: Build canary image
+        run: docker compose build
+
+      - name: Start services
+        run: docker compose up -d --force-recreate --remove-orphans
+
+      - name: Prune old images
+        run: docker image prune -f

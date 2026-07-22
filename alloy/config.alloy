@@ -1,0 +1,84 @@
+// Alloy: collect container logs via Docker service discovery.
+//
+// Not the Docker Loki log driver: that would require editing every app's
+// compose file in every separate repo — the exact cross-repo coupling this
+// design forbids — and it breaks `docker logs`, removing the debugging tool
+// of last resort when Loki itself is broken.
+//
+// Not reading JSON log files off disk: that yields container IDs, not
+// names, and the mapping breaks every time a container is recreated.
+//
+// See SPEC decision 5.
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// The socket is mounted read-only, but note that socket access is
+// root-equivalent on the host regardless: anything that can talk to the
+// Docker API can start a privileged container. Mitigations for v1 are the
+// read-only mount, the image pinned by digest in docker-compose.yml, and
+// never exposing Alloy's HTTP port. A docker-socket-proxy sidecar
+// whitelisting only the read endpoints is the stricter option and is a
+// drop-in upgrade — deferred (SPEC decision 5).
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Pi-hole logs every DNS query on the network and would dwarf everything
+  // else on this box combined. Excluded on volume, not principle — deleting
+  // this one rule is all it takes to get DNS forensics back
+  // (SPEC decision 4).
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(pihole|pi-hole).*"
+    action        = "drop"
+  }
+
+  // Docker reports names with a leading slash ("/caddy"); strip it.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+
+  // compose_project is what makes "everything in this app's stack,
+  // including its Postgres and RabbitMQ" a single query — the correlation
+  // SPEC decision 4 exists to enable.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+}
+
+// These three are the entire label schema. Labels are baked into chunks at
+// write time, so revising the schema later does not fix existing data — the
+// risk is deliberately taken toward under-labelling. Everything else
+// (request IDs, entity IDs, app-specific `component`) stays a line field,
+// queried with `| json` at query time (SPEC decision 12).
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  forward_to       = [loki.write.default.receiver]
+  refresh_interval = "15s"
+}
+
+// If Loki is down or slow, Alloy batches and retries in memory; the
+// applications being monitored never notice. This is the property the
+// Docker log driver cannot offer — there, a slow Loki can block the
+// container or drop its logs.
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

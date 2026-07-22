@@ -1,0 +1,59 @@
+name: Validate
+
+# Catches the likeliest failure — a malformed config that crash-loops on the
+# box while nobody is watching — before the runner ever deploys it.
+#
+# Deploy still happens on push to main; this adds no review gate.
+on:
+  pull_request:
+  workflow_dispatch:
+
+# NOTE: ubuntu-latest, deliberately NOT self-hosted. The self-hosted runner
+# executes inside the LAN, behind Caddy; running pull-request code there
+# would hand anything in a PR the same reach. Validation needs no access to
+# the box.
+jobs:
+  config:
+    name: Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Placeholder values only. This proves the compose file interpolates
+      # and parses; it proves nothing about the real secrets.
+      - name: Write a placeholder .env
+        run: |
+          cat > .env <<'EOF'
+          EDGE_BASE_DOMAIN=example.com
+          GF_SECURITY_ADMIN_PASSWORD=placeholder
+          HC_PING_URL_PIPELINE=http://example.invalid/ping/pipeline
+          HC_PING_URL_DISK=http://example.invalid/ping/disk
+          EOF
+
+      - name: docker compose config
+        run: docker compose config -q
+
+      - name: docker compose config (test rig)
+        run: docker compose -f test/docker-compose.test.yml config -q
+
+      # Checks component wiring and argument types, not merely that the file
+      # parses. Keep the digest in step with docker-compose.yml.
+      - name: Validate Alloy configuration
+        run: |
+          docker run --rm -v "$PWD/alloy:/etc/alloy:ro" \
+            grafana/alloy:v1.18.0@sha256:491b0578c04983fd54fe99b587b6fab4404dc46d0dc16677bd6b00cc1140b308 \
+            validate /etc/alloy/config.alloy
+
+      - name: Shellcheck the canary
+        run: shellcheck --shell=sh canary/canary.sh && shellcheck test/run-tests.sh
+
+  canary:
+    name: Canary behaviour
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The real canary image against a real Loki. Four of the five cases
+      # assert that no ping is sent — the inversion is the whole point.
+      - name: Run canary test suite
+        run: test/run-tests.sh
