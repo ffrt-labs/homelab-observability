@@ -117,9 +117,13 @@ services:
       LOKI_WINDOW: 5m
       DISK_PATH: /host
       DISK_THRESHOLD_PCT: "80"
+      # /proc/meminfo inside the container reports the host's memory, so no
+      # extra mount is needed for this.
+      MEM_MIN_AVAIL_PCT: "10"
       CHECK_INTERVAL_SECONDS: "300"
       HC_PING_URL_PIPELINE: ${HC_PING_URL_PIPELINE}
       HC_PING_URL_DISK: ${HC_PING_URL_DISK}
+      HC_PING_URL_MEMORY: ${HC_PING_URL_MEMORY}
     volumes:
       # Read-only view of the host root filesystem, so `df` measures the
       # disk that actually matters. A second privileged-ish mount alongside

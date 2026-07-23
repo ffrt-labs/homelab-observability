@@ -462,6 +462,44 @@ as a drop-in hardening upgrade once nothing can route to it.
 > **Not solved by this.** Alloy still holds the Docker socket and the canary sidecar now
 > holds the host root filesystem. Network isolation touches neither.
 
+### 16. Host-memory check
+
+*Added 2026-07-23, after task 1 shipped.*
+
+A third out-of-band canary check, alongside the disk check, watching total host memory.
+
+It earns the out-of-band slot on the **same** grounds as disk (decision 10): a box
+exhausting memory OOM-kills processes and thrashes swap, and what the kernel kills may be
+Loki, Alloy or Grafana. The condition degrades the very stack that would report it, so it
+cannot be alerted on *through* that stack — it has to be watched from outside. This is the
+one property that distinguishes it from per-container memory, which is ordinary metrics
+work for Prometheus in task 3.
+
+**Signal: `MemAvailable`, nothing else.** Not "used" — Linux fills free RAM with
+reclaimable disk cache, so "used" reads ~90% on a healthy box and any naive threshold
+screams constantly. `MemAvailable` is the kernel's own estimate of what is reclaimable for
+new work, so a low value is the leading edge of the thrashing being guarded against. Swap
+rate was considered and rejected: sampling a rate over time is metrics-with-history work,
+which is precisely what Prometheus is for, and the canary must stay the one dumb,
+trustworthy thing — a single `/proc/meminfo` read keeps it that way.
+
+**Threshold: ping while `MemAvailable` ≥ 10% of `MemTotal`**, configurable via
+`MEM_MIN_AVAIL_PCT`. Percentage, not an absolute floor, to match the disk check's idiom and
+survive a RAM change without re-tuning.
+
+**Sustained, not instantaneous.** Memory dips and recovers constantly, so this is a
+"sustained exhaustion" alarm: the 5-minute interval against a 15-minute grace means memory
+must sit below the floor for ~3 consecutive checks before Healthchecks.io fires. A deploy
+spike will not page anyone. The exact instant of an OOM kill is caught instead by task 3's
+container-down alert — the two are complementary, which is the point.
+
+> **Accepted trade-off:** on a box with lots of swap, `MemAvailable` can dip below the
+> floor while swap is still absorbing the load — so this can fire somewhat early. Erring
+> early is the right direction given the risk it guards is the box falling over entirely.
+
+Reads `/proc/meminfo`, which is not namespaced in a container and therefore reports the
+host's physical memory directly — no extra mount needed.
+
 ---
 
 ## Roadmap
@@ -616,3 +654,14 @@ build do not disagree from day one.
 
 Changes 1 and 3 are corrections — the spec as written was wrong. Changes 2, 4 and 5 are
 decisions the spec had not reached.
+
+### 2026-07-23 — during task 1 deployment
+
+| # | Change | Where |
+|---|---|---|
+| 6 | A new DNS `A` record **is** required per app — the DNS records on this box are per-app, not wildcard, even though the TLS cert is wildcard. Decision 8's "no new DNS record" was wrong for this box. | [Decision 8](#8-grafana-behind-caddy-lan-only), [Deliverables](#deliverables) |
+| 7 | A third out-of-band canary check for host memory (`MemAvailable` ≥ 10% of total) | [Decision 16](#16-host-memory-check) |
+
+Change 6 is a correction found when `grafana.<domain>` returned no DNS at all; the wildcard
+that decision 8 assumed does not exist. Change 7 is a new decision, added after task 1 had
+shipped and was running.
