@@ -128,7 +128,25 @@ reset_stub
 run_canary_once "DISK_THRESHOLD_PCT=100" "DISK_MIN_TOTAL_KB=999999999999"
 expect_no_ping "/ping/disk" "fails closed when measuring an implausibly small filesystem"
 
-echo "6. log lines present in the window"
+# MemAvailable is always < MemTotal, so avail% is always < 100 and always
+# >= 0 — which makes these two thresholds deterministic without a fixture,
+# the same trick the disk cases use.
+echo "6. available memory above the floor"
+reset_stub
+run_canary_once "MEM_MIN_AVAIL_PCT=0"
+expect_ping "/ping/memory" "pings when available memory is at or above the floor"
+
+echo "7. available memory below the floor"
+reset_stub
+run_canary_once "MEM_MIN_AVAIL_PCT=100"
+expect_no_ping "/ping/memory" "does not ping when available memory is below the floor"
+
+echo "8. meminfo unreadable"
+reset_stub
+run_canary_once "MEMINFO_PATH=/nonexistent/meminfo"
+expect_no_ping "/ping/memory" "fails closed when meminfo cannot be read"
+
+echo "9. log lines present in the window"
 reset_stub
 push_lines
 run_canary_once

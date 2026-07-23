@@ -48,10 +48,15 @@ services:
       # filling a real disk.
       DISK_PATH: /
       DISK_THRESHOLD_PCT: "80"
+      # The container's own /proc/meminfo reports the Docker VM's memory,
+      # which is a real, readable meminfo — enough to exercise the check.
+      # Individual cases move MEM_MIN_AVAIL_PCT or MEMINFO_PATH.
+      MEM_MIN_AVAIL_PCT: "10"
       CANARY_ONCE: "1"
       CURL_TIMEOUT: "5"
       HC_PING_URL_PIPELINE: http://stub:8080/ping/pipeline
       HC_PING_URL_DISK: http://stub:8080/ping/disk
+      HC_PING_URL_MEMORY: http://stub:8080/ping/memory
     depends_on:
       - loki
 

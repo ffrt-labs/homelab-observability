@@ -32,10 +32,11 @@ jobs:
           GF_SECURITY_ADMIN_PASSWORD: ${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
           HC_PING_URL_PIPELINE: ${{ secrets.HC_PING_URL_PIPELINE }}
           HC_PING_URL_DISK: ${{ secrets.HC_PING_URL_DISK }}
+          HC_PING_URL_MEMORY: ${{ secrets.HC_PING_URL_MEMORY }}
         run: |
           missing=""
           for name in EDGE_BASE_DOMAIN GF_SECURITY_ADMIN_PASSWORD \
-                      HC_PING_URL_PIPELINE HC_PING_URL_DISK; do
+                      HC_PING_URL_PIPELINE HC_PING_URL_DISK HC_PING_URL_MEMORY; do
             value="$(printenv "$name" || true)"
             if [ -z "$value" ]; then
               missing="$missing $name"
@@ -57,6 +58,7 @@ jobs:
           GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GF_SECURITY_ADMIN_PASSWORD }}
           HC_PING_URL_PIPELINE=${{ secrets.HC_PING_URL_PIPELINE }}
           HC_PING_URL_DISK=${{ secrets.HC_PING_URL_DISK }}
+          HC_PING_URL_MEMORY=${{ secrets.HC_PING_URL_MEMORY }}
           EOF
 
       # Created by homelab-edge, but declared external here. Idempotent, and

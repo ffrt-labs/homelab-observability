@@ -27,7 +27,7 @@ Task 1 of the [roadmap](SPEC.md#roadmap). Collection, search, and the two out-of
 | **Alloy** | Reads container logs via Docker service discovery, ships them to Loki |
 | **Loki** | Log store. Filesystem backend, 90-day retention, per-stream rate limits |
 | **Grafana** | Query UI, at `grafana.<EDGE_BASE_DOMAIN>` behind Caddy |
-| **canary** | The dead-man's switch and the disk check |
+| **canary** | The dead-man's switch, the disk check, and the host-memory check |
 
 Not yet: Prometheus, container metrics, Docker events, Telegram, and every Grafana alert
 rule. Those are tasks 2 and 3.
@@ -51,8 +51,8 @@ rule. Those are tasks 2 and 3.
   network. Single-binary Loki runs `auth_enabled: false`, so putting it on the shared `edge`
   network would give every application container an unauthenticated read API over every log
   line on the server.
-- **Two inverted heartbeats.** The canary pings Healthchecks.io only while it can prove
-  things are healthy; the *absence* of a ping is the alarm. Both notify by **email**, not
+- **Three inverted heartbeats.** The canary pings Healthchecks.io only while it can prove
+  things are healthy; the *absence* of a ping is the alarm. All notify by **email**, not
   Telegram — if the failure is "the box lost internet", a Telegram alert that never arrives
   is worthless.
 
@@ -60,6 +60,11 @@ rule. Those are tasks 2 and 3.
 |---|---|---|
 | Pipeline | Loki reports > 0 lines in the last 5 minutes | containers → Docker socket → Alloy → Loki → query API |
 | Disk | host disk usage is below 80% | the box is not about to take every app down at once |
+| Memory | host `MemAvailable` is ≥ 10% of total | the box is not about to OOM-kill and thrash |
+
+The disk and memory checks are both out-of-band for the same reason: a full disk or an
+exhausted box degrades Loki, Prometheus and Grafana themselves, so neither condition can be
+alerted on *through* the stack — the reporter is what breaks.
 
 The pipeline check is deliberately not a naive heartbeat. A sidecar that curls a URL every
 five minutes proves only that the box has power and the internet works — Alloy could be
@@ -70,15 +75,27 @@ implausibly smaller than the host root it is supposed to be watching (`DISK_MIN_
 default 10 GB) — because a lost or misdirected host mount otherwise yields a perfectly
 valid, permanently healthy number. It fails closed and emails you instead.
 
+The memory check reads `MemAvailable` from `/proc/meminfo` (not "used" — Linux fills free
+RAM with reclaimable disk cache, so "used" reads ~90% on a healthy box). It is a *sustained
+exhaustion* signal: a momentary spike during a deploy won't page you, because the 5-minute
+interval against a 15-minute grace means memory must sit below the floor for roughly three
+consecutive checks before Healthchecks.io alarms. The exact instant of an OOM kill is
+caught instead by the container-down alert in task 3 — the two are complementary. Tune the
+floor with `MEM_MIN_AVAIL_PCT` (default 10).
+
 ## One-time setup
 
-1. **Healthchecks.io** (free tier) — create **two** checks:
-   - Both: **Period 5 minutes, Grace 15 minutes**, notify by **email**.
-   - Name them something like `homelab-log-pipeline` and `homelab-disk`.
+1. **Healthchecks.io** (free tier) — create **three** checks:
+   - All: **Period 5 minutes, Grace 15 minutes**, notify by **email**.
+   - Name them something like `homelab-log-pipeline`, `homelab-disk` and `homelab-memory`.
    - Copy each ping URL.
-2. **GitHub repo settings** → Settings → Secrets and variables → Actions:
+2. **A DNS record for Grafana.** Unlike the TLS cert (a wildcard), the DNS records on this
+   box are per-app. Add an `A` record `grafana` → your server's LAN IP, **DNS only (grey
+   cloud)** — the same record every other app already has.
+3. **GitHub repo settings** → Settings → Secrets and variables → Actions:
    - **Variables**: `EDGE_BASE_DOMAIN` = your bare domain (must match `homelab-edge`).
-   - **Secrets**: `GF_SECURITY_ADMIN_PASSWORD`, `HC_PING_URL_PIPELINE`, `HC_PING_URL_DISK`.
+   - **Secrets**: `GF_SECURITY_ADMIN_PASSWORD`, `HC_PING_URL_PIPELINE`, `HC_PING_URL_DISK`,
+     `HC_PING_URL_MEMORY`.
 
    > **Set `GF_SECURITY_ADMIN_PASSWORD` before the first deploy.** Grafana honours it only
    > when it initialises its database. Deploy once without it and the volume holds
@@ -86,10 +103,10 @@ valid, permanently healthy number. It fails closed and emails you instead.
    > The deploy workflow refuses to start when it is blank, but the guard only helps if it
    > is in place before the first run. Recovery is `docker compose down -v`, which is safe
    > here — the Grafana volume is a disposable cache and Git is the source of truth.
-3. **Merge the `@grafana` route in `homelab-edge`.** Grafana publishes no host port; Caddy
+4. **Merge the `@grafana` route in `homelab-edge`.** Grafana publishes no host port; Caddy
    is the only way to reach it. That PR restarts Caddy for every app on the box, so do it
    once, deliberately.
-4. Push to `main`.
+5. Push to `main`.
 
 ## Verification
 
