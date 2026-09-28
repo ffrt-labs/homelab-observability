@@ -1,0 +1,31 @@
+# Provisioned from Git, never clicked into existence (same rationale as
+# loki.yml — SPEC decision 6).
+#
+# Read-only view onto mycoach's health_analytics schema (mycoach#117):
+# `grafana_role` has USAGE + SELECT scoped to that schema only, so this
+# datasource can query `daily_metrics`/`activities`/`gym_sets` but gets a
+# permission error against mycoach's `health` or `coaching` tables directly
+# — enforced by Postgres grants, not by anything in this repo.
+apiVersion: 1
+
+datasources:
+  - name: MyCoach Health Analytics
+    type: postgres
+    uid: mycoach-health-analytics
+    access: proxy
+    # mycoach-db is a different compose project's container, unreachable on
+    # any network this stack joins (see this repo's `networks:` — Grafana is
+    # only on `observability` and `edge`). Both boxes are on the same
+    # tailnet, which is the network they actually share
+    # (mycoach/docker-compose.yml, ticket #117); `$__env{}` is Grafana's own
+    # provisioning-time env var expansion, resolved from the container
+    # environment below, not from docker-compose interpolation.
+    url: $__env{MYCOACH_DB_TAILNET_IP}:5432
+    database: mycoach
+    user: grafana_role
+    editable: false
+    jsonData:
+      sslmode: disable # already inside the Tailscale-encrypted tailnet
+      postgresVersion: 1600
+    secureJsonData:
+      password: $__env{MYCOACH_GRAFANA_DB_PASSWORD}

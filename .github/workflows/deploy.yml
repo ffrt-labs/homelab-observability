@@ -33,10 +33,13 @@ jobs:
           HC_PING_URL_PIPELINE: ${{ secrets.HC_PING_URL_PIPELINE }}
           HC_PING_URL_DISK: ${{ secrets.HC_PING_URL_DISK }}
           HC_PING_URL_MEMORY: ${{ secrets.HC_PING_URL_MEMORY }}
+          MYCOACH_DB_TAILNET_IP: ${{ vars.MYCOACH_DB_TAILNET_IP }}
+          MYCOACH_GRAFANA_DB_PASSWORD: ${{ secrets.MYCOACH_GRAFANA_DB_PASSWORD }}
         run: |
           missing=""
           for name in EDGE_BASE_DOMAIN GF_SECURITY_ADMIN_PASSWORD \
-                      HC_PING_URL_PIPELINE HC_PING_URL_DISK HC_PING_URL_MEMORY; do
+                      HC_PING_URL_PIPELINE HC_PING_URL_DISK HC_PING_URL_MEMORY \
+                      MYCOACH_DB_TAILNET_IP MYCOACH_GRAFANA_DB_PASSWORD; do
             value="$(printenv "$name" || true)"
             if [ -z "$value" ]; then
               missing="$missing $name"
@@ -59,6 +62,8 @@ jobs:
           HC_PING_URL_PIPELINE=${{ secrets.HC_PING_URL_PIPELINE }}
           HC_PING_URL_DISK=${{ secrets.HC_PING_URL_DISK }}
           HC_PING_URL_MEMORY=${{ secrets.HC_PING_URL_MEMORY }}
+          MYCOACH_DB_TAILNET_IP=${{ vars.MYCOACH_DB_TAILNET_IP }}
+          MYCOACH_GRAFANA_DB_PASSWORD=${{ secrets.MYCOACH_GRAFANA_DB_PASSWORD }}
           EOF
 
       # Created by homelab-edge, but declared external here. Idempotent, and
