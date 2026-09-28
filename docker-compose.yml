@@ -87,6 +87,11 @@ services:
       GF_SERVER_ROOT_URL: https://grafana.${EDGE_BASE_DOMAIN}
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Read by grafana/provisioning/datasources/mycoach-health-analytics.yml
+      # via Grafana's own `$__env{}` provisioning expansion, not by anything
+      # in this compose file (mycoach#117).
+      MYCOACH_DB_TAILNET_IP: ${MYCOACH_DB_TAILNET_IP}
+      MYCOACH_GRAFANA_DB_PASSWORD: ${MYCOACH_GRAFANA_DB_PASSWORD}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       # Disposable cache. Git is the source of truth (SPEC decision 6).
