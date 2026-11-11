@@ -1,0 +1,18 @@
+# Dashboards are built in the Grafana UI, exported as JSON and committed here
+# (SPEC decision 6): the grafana-data volume is disposable, so a dashboard
+# that only lives in the UI is lost on the next `down -v`.
+#
+# To change one: edit it in the UI, Export → Export as JSON, overwrite its
+# file below, and commit. allowUiUpdates lets you save while iterating, but
+# the file wins again on the next restart, so an unexported edit is lost.
+apiVersion: 1
+
+providers:
+  - name: mycoach
+    folder: MyCoach
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards/mycoach
