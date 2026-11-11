@@ -1,0 +1,422 @@
+{
+  "uid": "mycoach-overview",
+  "title": "MyCoach Overview",
+  "tags": [
+    "mycoach"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "refresh": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "HRV (7-day avg)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time, hrv_7day_avg AS value\nFROM health_analytics.daily_metrics\nWHERE $__timeFilter(snapshot_date) AND hrv_7day_avg IS NOT NULL\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Resting HR",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time, resting_hr AS value\nFROM health_analytics.daily_metrics\nWHERE $__timeFilter(snapshot_date) AND resting_hr IS NOT NULL\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bpm"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Sleep score",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time, sleep_score AS value\nFROM health_analytics.daily_metrics\nWHERE $__timeFilter(snapshot_date) AND sleep_score IS NOT NULL\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Body Battery (morning)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time, body_battery_morning AS value\nFROM health_analytics.daily_metrics\nWHERE $__timeFilter(snapshot_date) AND body_battery_morning IS NOT NULL\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Recovery trends",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time,\n       hrv_7day_avg AS \"HRV 7d avg\",\n       resting_hr AS \"Resting HR\",\n       sleep_score AS \"Sleep score\",\n       body_battery_morning AS \"Body Battery (morning)\"\nFROM health_analytics.daily_metrics\nWHERE $__timeFilter(snapshot_date)\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Sleep stages",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time,\n       sleep_deep_minutes / 60.0 AS \"Deep\",\n       sleep_rem_minutes / 60.0 AS \"REM\",\n       sleep_light_minutes / 60.0 AS \"Light\",\n       sleep_awake_minutes / 60.0 AS \"Awake\"\nFROM health_analytics.daily_metrics\nWHERE $__timeFilter(snapshot_date)\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "spanNulls": true,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Weekly training time by sport",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('week', start_time) AS time, sport AS metric,\n       sum(duration_minutes) / 60.0 AS value\nFROM health_analytics.activities\nWHERE $__timeFilter(start_time)\nGROUP BY 1, 2\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "spanNulls": true,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Hours per ISO week. One very long logged session (e.g. a logger session left open) will dominate its week."
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Estimated 1RM per exercise (weekly best)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('week', start_time) AS time, exercise_title AS metric,\n       max(weight_kg * (1 + reps / 30.0)) AS value\nFROM health_analytics.gym_sets\nWHERE $__timeFilter(start_time) AND set_type = 'normal' AND reps > 0 AND weight_kg > 0\nGROUP BY 1, 2\nORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "unit": "kg"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Epley estimate, weight \u00d7 (1 + reps / 30), best normal set per exercise per week."
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Recent activities",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mycoach-health-analytics"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mycoach-health-analytics"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT start_time AS \"Start\", sport AS \"Sport\", title AS \"Title\",\n       duration_minutes AS \"Minutes\", avg_hr AS \"Avg HR\", calories AS \"kcal\",\n       round((distance_meters / 1000.0)::numeric, 2) AS \"km\"\nFROM health_analytics.activities\nWHERE $__timeFilter(start_time)\nORDER BY start_time DESC\nLIMIT 50",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}
